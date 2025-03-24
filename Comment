@@ -1,1 +1,101 @@
+# cfo_forecast_simulator.py
+
+import streamlit as st
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import os
+from prophet import Prophet
+from groq import Groq
+from dotenv import load_dotenv
+
+# Load API key securely
+load_dotenv()
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+if not GROQ_API_KEY:
+    st.error("🚨 API Key is missing! Set it in Streamlit Secrets or a .env file.")
+    st.stop()
+
+# **🎨 Streamlit UI Styling**
+st.set_page_config(page_title="CFO Forecast Simulator", page_icon="📈", layout="wide")
+
+# **Upload File**
+st.title("📊 CFO Forecast Strategy Simulator")
+uploaded_file = st.file_uploader("Upload Excel File with 'Date' and 'Revenue' columns", type=["xlsx"])
+
+if uploaded_file:
+    df = pd.read_excel(uploaded_file)
+    
+    if 'Date' not in df.columns or 'Revenue' not in df.columns:
+        st.error("Excel file must contain 'Date' and 'Revenue' columns.")
+        st.stop()
+
+    df['Date'] = pd.to_datetime(df['Date'])
+    df = df.sort_values('Date')
+
+    st.subheader("📄 Uploaded Data Preview")
+    st.dataframe(df.head())
+
+    # Forecast with Prophet
+    prophet_df = df.rename(columns={"Date": "ds", "Revenue": "y"})
+    model = Prophet()
+    model.fit(prophet_df)
+
+    periods = st.slider("🔮 Forecast Horizon (months)", 3, 24, 6)
+    future = model.make_future_dataframe(periods=periods * 30)
+    forecast = model.predict(future)
+
+    st.subheader("📈 Revenue Forecast")
+    fig1 = model.plot(forecast)
+    st.pyplot(fig1)
+
+    st.subheader("📊 Forecast Components")
+    fig2 = model.plot_components(forecast)
+    st.pyplot(fig2)
+
+    # **🧠 Generate CFO Simulation Exercise**
+    st.subheader("🧠 CFO Forecast Simulation Exercise")
+
+    recent_data = forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].tail(12).to_dict(orient="records")
+    data_for_ai = pd.DataFrame(recent_data).to_json(orient="records")
+
+    client = Groq(api_key=GROQ_API_KEY)
+
+    prompt = f"""
+    You are the CFO of a high-growth SaaS company. Based on the forecasted revenue data below, generate a simulation exercise for executive decision-making:
+    - Create 3 financial planning scenarios: Base, Downside (-20% Revenue), Upside (+15% Revenue).
+    - For each, include strategic moves, risks, and FP&A signals to watch.
+    - Include a recommendation on how to allocate capital under each condition.
+    - Prompt the user (CFO) to write a short board-ready memo summarizing their view.
+
+    Here is the forecast data:
+    {data_for_ai}
+    """
+
+    response = client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": "You are an FP&A expert who creates executive finance strategy exercises."},
+            {"role": "user", "content": prompt}
+        ],
+        model="llama3-8b-8192",
+    )
+
+    ai_exercise = response.choices[0].message.content
+
+    # **Display AI Exercise**
+    st.markdown('<div class="exercise-container">', unsafe_allow_html=True)
+    st.subheader("📘 AI-Generated CFO Simulation Exercise")
+    st.write(ai_exercise)
+    st.markdown('</div>', unsafe_allow_html=True)
+
+    # **✍️ CFO Memo Box**
+    st.subheader("📝 Your CFO Memo to the Board")
+    user_memo = st.text_area("Write a 1-page memo summarizing your strategic response to the forecast:", height=300)
+
+    if user_memo:
+        st.success("✅ Memo saved. You’ve successfully completed the CFO simulation!")
+else:
+    st.info("📥 Upload an Excel file to get started.")
 
